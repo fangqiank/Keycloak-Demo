@@ -1,0 +1,44 @@
+services:
+  keycloak.auth.api:
+    image: ${DOCKER_REGISTRY-}keycloakauthapi
+    container_name: Keycloak.Auth.Api
+    build:
+      context: .
+      dockerfile: src/Keycloak.Auth.Api/Dockerfile
+    ports:
+      - 5000:8080
+      - 5001:8081
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+
+  keycloak.auth.proxy:
+    image: ${DOCKER_REGISTRY-}keycloakauthproxy
+    build:
+      context: .
+      dockerfile: src/Keycloak.Auth.Proxy/Dockerfile
+    ports:
+      - 6000:8080
+      - 6001:8081
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: Keycloak
+    command: start-dev
+    environment:
+      - KC_HEALTH_ENABLED=true
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    volumes:
+      - ./.containers/identity:/opt/keycloak/data
+    ports:
+      - 18080:8080
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: Jaeger
+    ports:
+      - 4317:4317
+      - 4318:4318
+      - 16686:16686
