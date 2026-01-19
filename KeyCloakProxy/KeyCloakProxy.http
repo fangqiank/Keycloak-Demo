@@ -1,0 +1,6 @@
+@KeyCloakProxy_HostAddress = http://localhost:5073
+
+GET {{KeyCloakProxy_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

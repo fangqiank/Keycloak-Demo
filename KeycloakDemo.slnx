@@ -1,6 +1,4 @@
 <Solution>
-  <Project Path="docker-compose.dcproj">
-    <Build />
-  </Project>
   <Project Path="KeycloakDemo/KeycloakDemo.csproj" />
+  <Project Path="KeyCloakProxy/KeyCloakProxy.csproj" />
 </Solution>
