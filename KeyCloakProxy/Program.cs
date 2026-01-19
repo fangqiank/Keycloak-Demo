@@ -16,6 +16,10 @@ builder.Services.AddHttpClient();
 // Keycloak configuration
 var keycloakAuthority = builder.Configuration["Keycloak:Authority"]
     ?? throw new InvalidOperationException("Keycloak:Authority is not configured");
+var keycloakMetadataAddress = builder.Configuration["Keycloak:MetadataAddress"]
+    ?? $"{keycloakAuthority}/.well-known/openid-configuration";
+var keycloakValidIssuer = builder.Configuration["Keycloak:ValidIssuer"]
+    ?? keycloakAuthority;
 var keycloakAudience = builder.Configuration["Keycloak:Audience"]
     ?? throw new InvalidOperationException("Keycloak:Audience is not configured");
 var keycloakClientId = builder.Configuration["Keycloak:ClientId"]
@@ -31,15 +35,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = keycloakAuthority;
+        options.MetadataAddress = keycloakMetadataAddress;
         options.Audience = keycloakAudience;
         options.RequireHttpsMetadata = requireHttpsMetadata;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
+            ValidIssuer = keycloakValidIssuer,
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            // Allow token to not have audience (fallback to account)
             ValidAudience = keycloakAudience
         };
         options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
