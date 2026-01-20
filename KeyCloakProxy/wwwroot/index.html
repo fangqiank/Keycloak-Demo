@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SECURE PORTAL // ACCESS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="crt-overlay"></div>
+    <div class="noise-overlay"></div>
+
+    <div class="container">
+        <header class="header">
+            <div class="header-left">
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">SYSTEM ONLINE</span>
+                </div>
+            </div>
+            <div class="header-center">
+                <h1 class="main-title">SECURE<span class="title-accent">//</span>PORTAL</h1>
+            </div>
+            <div class="header-right">
+                <div class="clock" id="clock">00:00:00</div>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="login-section">
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <span class="terminal-title">AUTHENTICATION REQUIRED</span>
+                        <div class="terminal-controls">
+                            <span class="control-dot"></span>
+                            <span class="control-dot"></span>
+                            <span class="control-dot"></span>
+                        </div>
+                    </div>
+                    <div class="terminal-body">
+                        <div class="terminal-output" id="terminalOutput">
+                            <p class="line"><span class="prompt">root@portal:~$</span> <span class="command typewriter">Initializing secure connection...</span></p>
+                            <p class="line"><span class="prompt">root@portal:~$</span> <span class="command typewriter-delay">Waiting for authentication...</span></p>
+                        </div>
+                        <div class="terminal-input">
+                            <span class="prompt">></span>
+                            <div class="auth-options">
+                                <button class="auth-btn" onclick="if(window.keycloakLogin) keycloakLogin(); else alert('Auth System Offline (Handler Missing)');">
+                                    <span class="btn-icon">🔐</span>
+                                    <span class="btn-text">AUTHENTICATE VIA KEYCLOAK</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-panel">
+                    <div class="info-block">
+                        <h3 class="info-title">ACCESS LEVELS</h3>
+                        <ul class="access-list">
+                            <li><span class="level-badge level-user">USER</span> Dashboard Access</li>
+                            <li><span class="level-badge level-admin">ADMIN</span> System Administration</li>
+                        </ul>
+                    </div>
+                    <div class="info-block">
+                        <h3 class="info-title">SECURITY STATUS</h3>
+                        <div class="security-status">
+                            <div class="status-item">
+                                <span class="status-label">Encryption</span>
+                                <span class="status-value status-active">AES-256</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Protocol</span>
+                                <span class="status-value status-active">OIDC</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Session</span>
+                                <span class="status-value status-inactive">None</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="decorative-grid">
+                <div class="grid-line"></div>
+                <div class="grid-line"></div>
+                <div class="grid-line"></div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-line"></div>
+            <div class="footer-content">
+                <span class="footer-text">KEYCLOAK AUTHENTICATION SYSTEM v2.0</span>
+                <span class="footer-text">SECURE CONNECTION ESTABLISHED</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', { hour12: false });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Check if already logged in
+        if (localStorage.getItem('accessToken')) {
+            window.location.href = '/dashboard.html';
+        }
+    </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -12,6 +12,12 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
+
+// Configure HttpClient with timeout for Keycloak
+builder.Services.AddHttpClient("Keycloak", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
 
 // Keycloak configuration
 var keycloakAuthority = builder.Configuration["Keycloak:Authority"]
@@ -27,9 +33,8 @@ var keycloakClientId = builder.Configuration["Keycloak:ClientId"]
 var keycloakClientSecret = builder.Configuration["Keycloak:ClientSecret"];
 var requireHttpsMetadata = builder.Configuration.GetValue<bool>("Keycloak:RequireHttpsMetadata");
 
-// Extract realm from authority for token endpoint
-var realm = keycloakAuthority.Split('/').Last();
-var keycloakTokenEndpoint = keycloakAuthority.Replace($"/realms/{realm}", $"/realms/{realm}/protocol/openid-connect/token");
+// Build token endpoint URL
+var keycloakTokenEndpoint = $"{keycloakAuthority}/protocol/openid-connect/token";
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -45,9 +50,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidAudience = keycloakAudience
+            ValidAudience = keycloakAudience,
+            // Keycloak claims mapping
+            NameClaimType = "preferred_username",
+            RoleClaimType = "resource_access"
         };
-        options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        options.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = context =>
             {
@@ -62,7 +70,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Policy requiring Admin role
+    options.AddPolicy("AdminOnly", policy =>
+        policy.AddRequirements(new KeycloakRoleRequirement("Admin")));
+
+    // Policy requiring Admin or User role
+    options.AddPolicy("UserOrAdmin", policy =>
+        policy.AddRequirements(new KeycloakRoleRequirement("Admin", "User")));
+});
+
+builder.Services.AddSingleton<IAuthorizationHandler, KeycloakRoleHandler>();
 
 var app = builder.Build();
 
@@ -78,22 +97,24 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// Enable static files for frontend
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Public endpoint for testing
-app.MapGet("/", () => new
+// API health check endpoint
+app.MapGet("/api/health", () => new
 {
     message = "Keycloak Proxy API",
     status = "running",
-    endpoints = new[]
-    {
-        "/ - public health check",
-        "/weatherforecast - requires authentication",
-        "/auth/token - exchange username/password for access token",
-        "/auth/validate - manual token validation"
-    }
+    timestamp = DateTime.Now
 });
+
+// Fallback to index.html for SPA routes
+app.MapFallbackToFile("index.html");
+
+// API endpoints - prefixed with /api
 
 // Token exchange endpoint
 app.MapPost("/auth/token", async (
@@ -138,6 +159,85 @@ app.MapPost("/auth/token", async (
     return Results.Ok(tokenResponse);
 })
 .Accepts<TokenRequest>("application/json")
+.Produces<TokenResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status422UnprocessableEntity);
+
+// OAuth2 callback endpoint - exchanges authorization code for tokens
+app.MapPost("/api/auth/callback", async (
+    CallbackRequest request,
+    IHttpClientFactory httpClientFactory,
+    CancellationToken ct) =>
+{
+    try
+    {
+        Console.WriteLine($"[Callback] Exchanging code for token...");
+        Console.WriteLine($"[Callback] Token endpoint: {keycloakTokenEndpoint}");
+
+        var httpClient = httpClientFactory.CreateClient("Keycloak");
+
+        var formData = new Dictionary<string, string>
+        {
+            { "grant_type", "authorization_code" },
+            { "client_id", keycloakClientId },
+            { "code", request.Code },
+            { "redirect_uri", request.RedirectUri },
+            { "code_verifier", request.CodeVerifier }
+        };
+
+        if (!string.IsNullOrEmpty(keycloakClientSecret))
+        {
+            formData["client_secret"] = keycloakClientSecret;
+        }
+
+        Console.WriteLine($"[Callback] Sending request to Keycloak...");
+
+        var response = await httpClient.PostAsync(
+            keycloakTokenEndpoint,
+            new FormUrlEncodedContent(formData),
+            CancellationToken.None);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(CancellationToken.None);
+            return Results.UnprocessableEntity(new
+            {
+                error = "Token exchange failed",
+                details = errorContent,
+                endpoint = keycloakTokenEndpoint
+            });
+        }
+
+        var content = await response.Content.ReadAsStringAsync(CancellationToken.None);
+
+        var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(content, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+
+        if (tokenResponse == null || string.IsNullOrEmpty(tokenResponse.access_token))
+        {
+            return Results.UnprocessableEntity(new
+            {
+                error = "No access_token in Keycloak response",
+                rawResponse = content
+            });
+        }
+
+        return Results.Ok(tokenResponse);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Callback] Exception: {ex.Message}");
+        Console.WriteLine($"[Callback] Stack trace: {ex.StackTrace}");
+        return Results.UnprocessableEntity(new
+        {
+            error = "Token exchange failed",
+            message = ex.Message,
+            endpoint = keycloakTokenEndpoint
+        });
+    }
+})
+.Accepts<CallbackRequest>("application/json")
 .Produces<TokenResponse>(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status422UnprocessableEntity);
 
@@ -275,7 +375,175 @@ app.MapGet("/weatherforecast", () =>
 .WithName("GetWeatherForecast")
 .RequireAuthorization();
 
+// Role-based endpoints
+
+// View current user roles
+app.MapGet("/auth/roles", (HttpContext context) =>
+{
+    var user = context.User;
+
+    // Get username from multiple possible claims
+    var username = user.Identity?.Name
+        ?? user.FindFirst("preferred_username")?.Value
+        ?? user.FindFirst("sub")?.Value
+        ?? user.FindFirst("email")?.Value
+        ?? "unknown";
+
+    // Extract roles from resource_access claim
+    var resourceAccessClaim = user.FindFirst("resource_access")?.Value;
+    List<string> roles = new();
+
+    if (!string.IsNullOrEmpty(resourceAccessClaim))
+    {
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(resourceAccessClaim);
+            if (jsonDoc.RootElement.TryGetProperty(keycloakClientId, out var clientAccess))
+            {
+                if (clientAccess.TryGetProperty("roles", out var rolesArray))
+                {
+                    foreach (var role in rolesArray.EnumerateArray())
+                    {
+                        roles.Add(role.GetString() ?? string.Empty);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // JSON parse failed, return empty roles
+        }
+    }
+
+    return Results.Ok(new
+    {
+        user = username,
+        clientId = keycloakClientId,
+        roles,
+        // Debug info
+        allClaims = user.Claims.Select(c => new { c.Type, c.Value })
+    });
+})
+.WithName("GetUserRoles")
+.RequireAuthorization();
+
+// Admin only endpoint
+app.MapGet("/api/admin", (HttpContext context) =>
+{
+    var user = context.User;
+
+    // Get username
+    var username = user.Identity?.Name
+        ?? user.FindFirst("preferred_username")?.Value
+        ?? user.FindFirst("sub")?.Value
+        ?? "unknown";
+
+    // Extract roles from resource_access
+    var resourceAccessClaim = user.FindFirst("resource_access")?.Value;
+    List<string> roles = new();
+
+    if (!string.IsNullOrEmpty(resourceAccessClaim))
+    {
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(resourceAccessClaim);
+            if (jsonDoc.RootElement.TryGetProperty(keycloakClientId, out var clientAccess))
+            {
+                if (clientAccess.TryGetProperty("roles", out var rolesArray))
+                {
+                    foreach (var role in rolesArray.EnumerateArray())
+                    {
+                        roles.Add(role.GetString() ?? string.Empty);
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    return Results.Ok(new
+    {
+        message = "Admin access granted",
+        user = username,
+        roles,
+        hasAdminRole = roles.Contains("Admin"),
+        timestamp = DateTime.Now
+    });
+})
+.WithName("AdminEndpoint")
+.RequireAuthorization("AdminOnly");
+
+// Dashboard endpoint (Admin or User)
+app.MapGet("/api/dashboard", (HttpContext context) =>
+{
+    return Results.Ok(new
+    {
+        message = "Dashboard access granted",
+        user = context.User.Identity?.Name,
+        timestamp = DateTime.Now
+    });
+})
+.WithName("DashboardEndpoint")
+.RequireAuthorization("UserOrAdmin");
+
 app.Run();
+
+// Custom authorization requirement for Keycloak roles
+class KeycloakRoleRequirement : IAuthorizationRequirement
+{
+    public string[] RequiredRoles { get; }
+    public KeycloakRoleRequirement(params string[] roles) => RequiredRoles = roles;
+}
+
+class KeycloakRoleHandler : AuthorizationHandler<KeycloakRoleRequirement>
+{
+    private readonly IConfiguration _configuration;
+
+    public KeycloakRoleHandler(IConfiguration configuration)
+    {
+        _configuration = configuration;
+    }
+
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, KeycloakRoleRequirement requirement)
+    {
+        var clientId = _configuration["Keycloak:ClientId"] ?? string.Empty;
+        var user = context.User;
+
+        var resourceAccessClaim = user.FindFirst("resource_access")?.Value;
+
+        if (string.IsNullOrEmpty(resourceAccessClaim))
+        {
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(resourceAccessClaim);
+            if (jsonDoc.RootElement.TryGetProperty(clientId, out var clientAccess))
+            {
+                if (clientAccess.TryGetProperty("roles", out var rolesArray))
+                {
+                    var userRoles = new List<string>();
+                    foreach (var role in rolesArray.EnumerateArray())
+                    {
+                        userRoles.Add(role.GetString() ?? string.Empty);
+                    }
+
+                    if (requirement.RequiredRoles.Any(role => userRoles.Contains(role, StringComparer.OrdinalIgnoreCase)))
+                    {
+                        context.Succeed(requirement);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Silently fail on parse error for security
+        }
+
+        return Task.CompletedTask;
+    }
+}
 
 internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
@@ -284,13 +552,16 @@ internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary
 
 internal record TokenRequest(string Username, string Password);
 
+internal record CallbackRequest(string Code, string CodeVerifier, string RedirectUri);
+
 internal record TokenResponse(
     string access_token,
     string token_type,
     int expires_in,
     int refresh_expires_in,
     string refresh_token,
-    string scope
+    string scope,
+    string? id_token
 );
 
 internal record ValidateTokenRequest(string Token);

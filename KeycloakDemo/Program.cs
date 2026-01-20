@@ -52,7 +52,8 @@ builder.Services.AddAuthentication(options =>
         options.Scope.Clear();
         options.Scope.Add("openid");
         options.Scope.Add("profile");
-        options.Scope.Add("email");
+        //options.Scope.Add("email");
+        //options.Scope.Add("client roles");
 
         options.RequireHttpsMetadata = false;
 

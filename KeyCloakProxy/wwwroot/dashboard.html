@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SECURE PORTAL // DASHBOARD</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dashboard-page">
+    <div class="crt-overlay"></div>
+    <div class="noise-overlay"></div>
+
+    <div class="container">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <span class="brand-icon">⬡</span>
+                <span class="brand-text">SECURE PORTAL</span>
+            </div>
+            <div class="nav-links">
+                <a href="dashboard.html" class="nav-link active">DASHBOARD</a>
+                <a href="profile.html" class="nav-link">PROFILE</a>
+            </div>
+            <div class="nav-user">
+                <span class="user-name" id="navUserName">...</span>
+                <button class="logout-btn" onclick="logout()">LOGOUT</button>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <div class="dashboard-header">
+                <h1 class="page-title">
+                    <span class="title-prefix">//</span>
+                    COMMAND CENTER
+                </h1>
+                <div class="dashboard-stats">
+                    <div class="stat-card">
+                        <span class="stat-label">SESSION</span>
+                        <span class="stat-value" id="sessionTime">00:00:00</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">ACCESS</span>
+                        <span class="stat-value" id="accessLevel">USER</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">STATUS</span>
+                        <span class="stat-value stat-active">AUTHORIZED</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="dashboard-card card-large">
+                    <div class="card-header">
+                        <h2 class="card-title">SYSTEM STATUS</h2>
+                        <div class="card-indicator active"></div>
+                    </div>
+                    <div class="card-body">
+                        <div class="status-grid">
+                            <div class="status-block">
+                                <span class="status-label">Authentication</span>
+                                <span class="status-badge status-ok">OK</span>
+                            </div>
+                            <div class="status-block">
+                                <span class="status-label">Keycloak</span>
+                                <span class="status-badge status-ok">CONNECTED</span>
+                            </div>
+                            <div class="status-block">
+                                <span class="status-label">API Gateway</span>
+                                <span class="status-badge status-ok">ONLINE</span>
+                            </div>
+                            <div class="status-block">
+                                <span class="status-label">Database</span>
+                                <span class="status-badge status-ok">SYNCED</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h2 class="card-title">QUICK ACTIONS</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="action-list">
+                            <button class="action-btn" onclick="refreshToken()">
+                                <span class="action-icon">⟳</span>
+                                <span class="action-text">REFRESH TOKEN</span>
+                            </button>
+                            <button class="action-btn" onclick="window.location.href='profile.html'">
+                                <span class="action-icon">👤</span>
+                                <span class="action-text">VIEW PROFILE</span>
+                            </button>
+                            <button class="action-btn" onclick="testApiCall()">
+                                <span class="action-icon">🔌</span>
+                                <span class="action-text">TEST API</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card card-wide">
+                    <div class="card-header">
+                        <h2 class="card-title">ACTIVITY LOG</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="log-list" id="activityLog">
+                            <div class="log-entry">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-message">Initializing session...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card admin-only" id="adminCard" style="display: none;">
+                    <div class="card-header">
+                        <h2 class="card-title">ADMIN PANEL</h2>
+                        <span class="admin-badge">RESTRICTED</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="admin-actions">
+                            <button class="admin-btn" onclick="callAdminApi()">
+                                <span class="btn-label">ACCESS ADMIN ENDPOINT</span>
+                                <span class="btn-arrow">→</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-line"></div>
+            <div class="footer-content">
+                <span class="footer-text">AUTHORIZED ACCESS ONLY</span>
+                <span class="footer-text" id="sessionId">SESSION: ...</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        let sessionStart = Date.now();
+
+        async function initDashboard() {
+            // Check if we are processing a callback (let app.js handle it)
+            if (window.location.search.includes('code=')) {
+                console.log('[Dashboard] Callback detected, waiting for app.js...');
+                return;
+            }
+
+            const token = localStorage.getItem('accessToken');
+            if (!token) {
+                window.location.href = '/index.html';
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/roles', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('navUserName').textContent = data.user || 'Unknown';
+                    document.getElementById('accessLevel').textContent = data.roles?.join(', ') || 'USER';
+
+                    // Show admin card if admin
+                    if (data.roles?.includes('Admin')) {
+                        document.getElementById('adminCard').style.display = 'block';
+                    }
+
+                    // Set session ID
+                    const claims = JSON.parse(atob(token.split('.')[1]));
+                    document.getElementById('sessionId').textContent = `SESSION: ${claims.sub?.substring(0, 8)}...`;
+
+                    addLog('Dashboard loaded successfully');
+                    addLog(`User: ${data.user}`);
+                    addLog(`Roles: ${data.roles?.join(', ') || 'None'}`);
+                } else {
+                    addLog('ERROR: Failed to load user data');
+                    setTimeout(() => logout(), 2000);
+                }
+            } catch (error) {
+                addLog('ERROR: ' + error.message);
+                setTimeout(() => logout(), 2000);
+            }
+
+            // Update session time
+            setInterval(() => {
+                const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+                const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+                const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+                const seconds = String(elapsed % 60).padStart(2, '0');
+                document.getElementById('sessionTime').textContent = `${hours}:${minutes}:${seconds}`;
+            }, 1000);
+        }
+
+        function addLog(message) {
+            const log = document.getElementById('activityLog');
+            const now = new Date();
+            const time = now.toLocaleTimeString('en-US', { hour12: false });
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">${time}</span><span class="log-message">${message}</span>`;
+            log.insertBefore(entry, log.firstChild);
+            if (log.children.length > 10) {
+                log.removeChild(log.lastChild);
+            }
+        }
+
+        async function refreshToken() {
+            addLog('Refreshing token...');
+            // Implement token refresh logic
+            addLog('Token refresh completed');
+        }
+
+        async function testApiCall() {
+            addLog('Testing API connection...');
+            try {
+                const response = await fetch('/weatherforecast', {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+                });
+                if (response.ok) {
+                    addLog('API test: SUCCESS');
+                } else {
+                    addLog('API test: FAILED');
+                }
+            } catch (error) {
+                addLog('API test: ERROR - ' + error.message);
+            }
+        }
+
+        async function callAdminApi() {
+            addLog('Accessing admin endpoint...');
+            try {
+                const response = await fetch('/api/admin', {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    addLog('Admin access: GRANTED');
+                    addLog('Message: ' + data.message);
+                } else {
+                    addLog('Admin access: DENIED (403)');
+                }
+            } catch (error) {
+                addLog('Admin API: ERROR - ' + error.message);
+            }
+        }
+
+        initDashboard();
+    </script>
+</body>
+</html>

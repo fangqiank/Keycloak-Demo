@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SECURE PORTAL // PROFILE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="profile-page">
+    <div class="crt-overlay"></div>
+    <div class="noise-overlay"></div>
+
+    <div class="container">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <span class="brand-icon">⬡</span>
+                <span class="brand-text">SECURE PORTAL</span>
+            </div>
+            <div class="nav-links">
+                <a href="dashboard.html" class="nav-link">DASHBOARD</a>
+                <a href="profile.html" class="nav-link active">PROFILE</a>
+            </div>
+            <div class="nav-user">
+                <span class="user-name" id="navUserName">...</span>
+                <button class="logout-btn" onclick="logout()">LOGOUT</button>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <div class="profile-header">
+                <div class="profile-avatar">
+                    <span class="avatar-icon">👤</span>
+                    <span class="avatar-status online"></span>
+                </div>
+                <div class="profile-info">
+                    <h1 class="profile-name" id="profileName">...</h1>
+                    <p class="profile-title">AUTHORIZED USER</p>
+                </div>
+            </div>
+
+            <div class="profile-content">
+                <div class="profile-section">
+                    <h2 class="section-title">
+                        <span class="section-icon">📋</span>
+                        USER INFORMATION
+                    </h2>
+                    <div class="info-grid" id="userInfo">
+                        <div class="info-item">
+                            <span class="info-label">USERNAME</span>
+                            <span class="info-value" id="infoUsername">Loading...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">CLIENT ID</span>
+                            <span class="info-value" id="infoClientId">Loading...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">ISSUER</span>
+                            <span class="info-value" id="infoIssuer">Loading...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">SUBJECT</span>
+                            <span class="info-value" id="infoSubject">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="profile-section">
+                    <h2 class="section-title">
+                        <span class="section-icon">🔑</span>
+                        ROLES & PERMISSIONS
+                    </h2>
+                    <div class="roles-container" id="rolesList">
+                        <span class="loading">Loading roles...</span>
+                    </div>
+                </div>
+
+                <div class="profile-section">
+                    <h2 class="section-title">
+                        <span class="section-icon">🔒</span>
+                        TOKEN DETAILS
+                    </h2>
+                    <div class="token-info">
+                        <div class="token-row">
+                            <span class="token-label">TOKEN TYPE</span>
+                            <span class="token-value">Bearer</span>
+                        </div>
+                        <div class="token-row">
+                            <span class="token-label">ALGORITHM</span>
+                            <span class="token-value" id="tokenAlg">RS256</span>
+                        </div>
+                        <div class="token-row">
+                            <span class="token-label">EXPIRES IN</span>
+                            <span class="token-value" id="tokenExpiry">Calculating...</span>
+                        </div>
+                    </div>
+                    <button class="token-toggle" onclick="toggleTokenDetails()">
+                        <span id="tokenToggleText">SHOW RAW TOKEN</span>
+                    </button>
+                    <div class="token-raw" id="tokenRaw" style="display: none;"></div>
+                </div>
+
+                <div class="profile-section">
+                    <h2 class="section-title">
+                        <span class="section-icon">📊</span>
+                        ALL CLAIMS
+                    </h2>
+                    <div class="claims-container" id="allClaims">
+                        <span class="loading">Loading claims...</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-line"></div>
+            <div class="footer-content">
+                <span class="footer-text">USER PROFILE</span>
+                <span class="footer-text">SECURE PORTAL v2.0</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        async function initProfile() {
+            const token = localStorage.getItem('accessToken');
+            if (!token) {
+                window.location.href = '/index.html';
+                return;
+            }
+
+            try {
+                // Parse token
+                const claims = JSON.parse(atob(token.split('.')[1]));
+
+                // Display user info
+                const username = claims.preferred_username || claims.sub || 'Unknown';
+                document.getElementById('navUserName').textContent = username;
+                document.getElementById('profileName').textContent = username;
+                document.getElementById('infoUsername').textContent = username;
+                document.getElementById('infoClientId').textContent = claims.aud || 'N/A';
+                document.getElementById('infoIssuer').textContent = claims.iss?.split('/').pop() || 'N/A';
+                document.getElementById('infoSubject').textContent = claims.sub?.substring(0, 16) + '...' || 'N/A';
+
+                // Token details
+                document.getElementById('tokenAlg').textContent = claims.typ || 'JWT';
+                if (claims.exp) {
+                    const expiry = new Date(claims.exp * 1000);
+                    const now = new Date();
+                    const minutes = Math.floor((expiry - now) / 60000);
+                    document.getElementById('tokenExpiry').textContent = `${minutes} minutes`;
+                }
+
+                // Fetch roles
+                const response = await fetch('/auth/roles', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    displayRoles(data.roles || []);
+                    displayClaims(data.allClaims || []);
+                }
+
+            } catch (error) {
+                console.error('Failed to load profile:', error);
+            }
+        }
+
+        function displayRoles(roles) {
+            const container = document.getElementById('rolesList');
+            if (roles.length === 0) {
+                container.innerHTML = '<span class="no-roles">No roles assigned</span>';
+                return;
+            }
+            container.innerHTML = roles.map(role =>
+                `<span class="role-badge ${role === 'Admin' ? 'role-admin' : 'role-user'}">${role}</span>`
+            ).join('');
+        }
+
+        function displayClaims(claims) {
+            const container = document.getElementById('allClaims');
+            container.innerHTML = claims.map(claim =>
+                `<div class="claim-item">
+                    <span class="claim-type">${claim.type || claim.Type}</span>
+                    <span class="claim-value">${claim.value || claim.Value}</span>
+                </div>`
+            ).join('');
+        }
+
+        function toggleTokenDetails() {
+            const raw = document.getElementById('tokenRaw');
+            const btnText = document.getElementById('tokenToggleText');
+            const token = localStorage.getItem('accessToken');
+
+            if (raw.style.display === 'none') {
+                try {
+                    const header = JSON.parse(atob(token.split('.')[0]));
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    raw.innerHTML = `
+                        <div class="token-section">
+                            <h4>HEADER</h4>
+                            <pre>${JSON.stringify(header, null, 2)}</pre>
+                        </div>
+                        <div class="token-section">
+                            <h4>PAYLOAD</h4>
+                            <pre>${JSON.stringify(payload, null, 2)}</pre>
+                        </div>
+                    `;
+                    raw.style.display = 'block';
+                    btnText.textContent = 'HIDE RAW TOKEN';
+                } catch (e) {
+                    raw.innerHTML = '<pre>' + token + '</pre>';
+                    raw.style.display = 'block';
+                    btnText.textContent = 'HIDE RAW TOKEN';
+                }
+            } else {
+                raw.style.display = 'none';
+                btnText.textContent = 'SHOW RAW TOKEN';
+            }
+        }
+
+        initProfile();
+    </script>
+</body>
+</html>
